@@ -77,6 +77,12 @@ CFG = {
             "y3": 0.1
         },
 
+        "arrhenius": {
+            "T_ref_K": 700.0,
+            "Ea_bounds_kJ_mol": [0.0, 300.0],
+            "log_ref_multiplier_bound": 10.0
+        },
+
         "solver": {
             "method": "rk4",
             "options": {
