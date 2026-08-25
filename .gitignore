@@ -216,3 +216,14 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+
+has_isothermal.txt
+validations.txt
+src/db/migrated/
+src/db/other_data/
+src/db/uncommitted_data/
+*.ipynb
+TODO
+check
+migrate.py
