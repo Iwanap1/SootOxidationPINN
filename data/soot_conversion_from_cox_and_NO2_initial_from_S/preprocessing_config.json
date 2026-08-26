@@ -1,0 +1,14 @@
+{
+    "notes": "Calculates initial NO2 from initial NOx * Selectivity (so dont use when considering total NOx), and uses COx ppm to fill in missing soot conversion using integrals (so dont use if fitting CO/CO2 ppm or mass balance)",
+    "preprocessor": {
+        "initial_nox_mode": "first_selectivity"
+    },
+    "filler": {
+        "add_provenance": true,
+        "max_iterations": 10,
+        "clip_small_negative": 1e-12,
+        "derive_soot_conversion_from_cox": true,
+        "cox_endpoint_fraction": 0.05,
+        "min_cox_points": 5
+    }
+}

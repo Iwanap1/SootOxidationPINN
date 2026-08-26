@@ -2,10 +2,10 @@ import torch
 import torch.nn.functional as F
 
 from .mlp import MLP
-from .total_nox_base import SootNOxNeuralODE
+from .total_nox_base import FullModelNeuralODE
 
 
-class NOxSelectivityModel(SootNOxNeuralODE):
+class FullModel(FullModelNeuralODE):
     def __init__(self, config, nn_input_dim, scaler):
         super().__init__(config, nn_input_dim, scaler)
 

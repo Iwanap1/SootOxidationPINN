@@ -14,8 +14,9 @@ class Preprocessor:
     }
 
 
-    def __init__(self):
+    def __init__(self, initial_nox_mode="measured_species"):
         self.physics_calculator = PhysicsCalculator()
+        self.initial_nox_mode = initial_nox_mode
 
     def preprocess(
         self,
@@ -130,88 +131,17 @@ class Preprocessor:
             .copy()
         )
 
-        inlet_no = first["NO_ppm"].fillna(0.0)
-        inlet_no2 = first["NO2_ppm"].fillna(0.0)
-        inlet_nox = inlet_no + inlet_no2
+        if self.initial_nox_mode == "measured_species":
+            initial = self._initial_nox_from_measured_species(first)
 
-        initial_no = inlet_no.copy()
-        initial_no2 = inlet_no2.copy()
-        initial_nox = inlet_nox.copy()
+        elif self.initial_nox_mode == "first_selectivity":
+            initial = self._initial_nox_from_first_selectivity(df, first)
 
-        # If NO2 is known at the first experimental point,
-        # use the measured initial NOx composition instead of
-        # the nominal reported inlet composition.
-        has_initial_no2 = first["no2_ppm"].notna()
-
-        # Best case: both NO and NO2 are known
-        has_initial_no_and_no2 = (
-            first["no_ppm"].notna()
-            & first["no2_ppm"].notna()
-        )
-
-        initial_no.loc[has_initial_no_and_no2] = (
-            first.loc[has_initial_no_and_no2, "no_ppm"]
-        )
-
-        initial_no2.loc[has_initial_no2] = (
-            first.loc[has_initial_no2, "no2_ppm"]
-        )
-
-        # If total NOx is also known, use it.
-        # Otherwise calculate it from NO + NO2.
-        has_initial_nox = first["nox_ppm"].notna()
-
-        initial_nox.loc[has_initial_nox & has_initial_no2] = (
-            first.loc[has_initial_nox & has_initial_no2, "nox_ppm"]
-        )
-
-        calculate_nox = has_initial_no2 & ~has_initial_nox
-
-        initial_nox.loc[calculate_nox] = (
-            initial_no.loc[calculate_nox]
-            + initial_no2.loc[calculate_nox]
-        )
-
-        # If NO itself was not measured, but NOx and NO2 were,
-        # recover NO from the balance.
-        infer_no = (
-            has_initial_no2
-            & has_initial_nox
-            & first["no_ppm"].isna()
-        )
-
-        initial_no.loc[infer_no] = (
-            initial_nox.loc[infer_no]
-            - initial_no2.loc[infer_no]
-        )
-
-        source = np.where(
-            has_initial_no2,
-            "initial_measurement",
-            "reported_inlet",
-        )
-
-        first["NO_initial_ppm"] = initial_no
-        first["NO2_initial_ppm"] = initial_no2
-        first["NOx_initial_ppm"] = initial_nox
-        first["initial_NOx_source"] = source
-
-        first["S_NO2_initial"] = np.where(
-            initial_nox > 0,
-            initial_no2 / initial_nox,
-            np.nan,
-        )
-
-        initial = first[
-            [
-                "_id",
-                "NO_initial_ppm",
-                "NO2_initial_ppm",
-                "NOx_initial_ppm",
-                "S_NO2_initial",
-                "initial_NOx_source",
-            ]
-        ]
+        else:
+            raise ValueError(
+                f"Unknown initial_nox_mode: {self.initial_nox_mode}. "
+                "Expected 'measured_species' or 'first_selectivity'."
+            )
 
         df = df.merge(
             initial,
@@ -252,3 +182,138 @@ class Preprocessor:
             how=how,
             suffixes=("_experiment", "_material"),
         )
+    
+    def _initial_nox_from_measured_species(self, first):
+        inlet_no = first["NO_ppm"].fillna(0.0)
+        inlet_no2 = first["NO2_ppm"].fillna(0.0)
+        inlet_nox = inlet_no + inlet_no2
+
+        initial_no = inlet_no.copy()
+        initial_no2 = inlet_no2.copy()
+        initial_nox = inlet_nox.copy()
+
+        has_initial_no2 = first["no2_ppm"].notna()
+
+        has_initial_no_and_no2 = (
+            first["no_ppm"].notna()
+            & first["no2_ppm"].notna()
+        )
+
+        initial_no.loc[has_initial_no_and_no2] = (
+            first.loc[has_initial_no_and_no2, "no_ppm"]
+        )
+
+        initial_no2.loc[has_initial_no2] = (
+            first.loc[has_initial_no2, "no2_ppm"]
+        )
+
+        has_initial_nox = first["nox_ppm"].notna()
+
+        initial_nox.loc[has_initial_nox & has_initial_no2] = (
+            first.loc[has_initial_nox & has_initial_no2, "nox_ppm"]
+        )
+
+        calculate_nox = has_initial_no2 & ~has_initial_nox
+
+        initial_nox.loc[calculate_nox] = (
+            initial_no.loc[calculate_nox]
+            + initial_no2.loc[calculate_nox]
+        )
+
+        infer_no = (
+            has_initial_no2
+            & has_initial_nox
+            & first["no_ppm"].isna()
+        )
+
+        initial_no.loc[infer_no] = (
+            initial_nox.loc[infer_no]
+            - initial_no2.loc[infer_no]
+        )
+
+        source = np.where(
+            has_initial_no2,
+            "initial_measurement",
+            "reported_inlet",
+        )
+
+        result = first[["_id"]].copy()
+
+        result["NO_initial_ppm"] = initial_no
+        result["NO2_initial_ppm"] = initial_no2
+        result["NOx_initial_ppm"] = initial_nox
+        result["initial_NOx_source"] = source
+
+        result["S_NO2_initial"] = np.where(
+            initial_nox > 0,
+            initial_no2 / initial_nox,
+            np.nan,
+        )
+
+        return result
+    
+    def _initial_nox_from_first_selectivity(self, df, first):
+        inlet_no = pd.to_numeric(first["NO_ppm"], errors="coerce").fillna(0.0)
+        inlet_no2 = pd.to_numeric(first["NO2_ppm"], errors="coerce").fillna(0.0)
+
+        reported_nox = inlet_no + inlet_no2
+
+        # If an explicit inlet total NOx exists, prefer it.
+        if "NOx_ppm" in first.columns:
+            explicit_nox = pd.to_numeric(first["NOx_ppm"], errors="coerce")
+            reported_nox = explicit_nox.where(explicit_nox.notna(), reported_nox)
+
+        # Find the first measured NO2 selectivity for each experiment.
+        first_selectivity = (
+            df.loc[df["no2_fraction_of_nox"].notna(), ["_id", "temperature", "no2_fraction_of_nox"]]
+            .sort_values(["_id", "temperature"])
+            .drop_duplicates("_id", keep="first")
+            .set_index("_id")["no2_fraction_of_nox"]
+            .reindex(first["_id"])
+        )
+
+        first_selectivity.index = first.index
+
+        valid_selectivity = (
+            first_selectivity.notna()
+            & first_selectivity.between(0.0, 1.0)
+            & (reported_nox > 0)
+        )
+
+        # Default/fallback is the nominal reported inlet composition.
+        initial_no = inlet_no.copy()
+        initial_no2 = inlet_no2.copy()
+        initial_nox = reported_nox.copy()
+
+        # For this model, preserve reported total NOx but initialise its NO/NO2
+        # split using the first experimentally observed selectivity.
+        initial_no2.loc[valid_selectivity] = (
+            reported_nox.loc[valid_selectivity]
+            * first_selectivity.loc[valid_selectivity]
+        )
+
+        initial_no.loc[valid_selectivity] = (
+            reported_nox.loc[valid_selectivity]
+            * (1.0 - first_selectivity.loc[valid_selectivity])
+        )
+
+        source = np.where(
+            valid_selectivity,
+            "first_selectivity+reported_inlet_total",
+            "reported_inlet",
+        )
+
+        result = first[["_id"]].copy()
+
+        result["NO_initial_ppm"] = initial_no
+        result["NO2_initial_ppm"] = initial_no2
+        result["NOx_initial_ppm"] = initial_nox
+        result["initial_NOx_source"] = source
+
+        result["S_NO2_initial"] = np.where(
+            initial_nox > 0,
+            initial_no2 / initial_nox,
+            np.nan,
+        )
+
+        return result

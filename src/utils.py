@@ -8,6 +8,7 @@ import math
 import matplotlib.pyplot as plt
 import torch
 import sys
+import importlib
 
 
 ANOMALOUS_EXP_IDS = [
@@ -255,7 +256,7 @@ def check_experiments_run(model, train_dataset):
 
 
 def load_model(model_dir, just_model=True):
-    models_module = sys.modules["src.architectures"]
+    models_module = importlib.import_module("src.architectures")
 
     with open(model_dir / "config.json", "r") as f:
         cfg = json.load(f)

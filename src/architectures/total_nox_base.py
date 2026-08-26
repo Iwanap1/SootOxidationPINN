@@ -5,7 +5,7 @@ from .node import NODE
 from ..physics_calculator import PhysicsCalculator
 
 
-class SootNOxNeuralODE(NODE):
+class FullModelNeuralODE(NODE):
     def __init__(self, config, nn_input_dim, scaler):
         super().__init__(config, nn_input_dim, scaler)
 

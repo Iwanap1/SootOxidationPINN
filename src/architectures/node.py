@@ -14,6 +14,7 @@ class NODE(nn.Module):
         self.eps = 1e-12
 
         state_mean, state_std = scaler.get_mean_std(config["nn"]["state"])
+        self.fitted_parameter_keys = {}
         self.register_buffer("state_mean", torch.tensor(state_mean, dtype=torch.float32))
         self.register_buffer("state_std", torch.tensor(state_std, dtype=torch.float32))
 

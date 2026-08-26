@@ -1,4 +1,5 @@
-from .total_nox_model import NOxSelectivityModel
-from .total_nox_arrh import ArrheniusNOxSelectivityModel
+from .total_nox_model import FullModel
+from .total_nox_arrh import ArrheniusFullModel
 from .only_s_nox import OnlySelectivityModel
+from .only_s_nox_arrh_old import ArrheniusOnlySelectivityModelOld
 from .only_s_nox_arrh import ArrheniusOnlySelectivityModel

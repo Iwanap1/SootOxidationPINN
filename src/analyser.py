@@ -238,16 +238,130 @@ class ModelAnalyser:
         return fig, parity
 
     def analyse(self, n_experiments=10, seed=None):
-        curves_fig, experiment_ids = self.plot_random_experiments(n_experiments=n_experiments, seed=seed)
+        parameter_fig, parameter_data = self.plot_fitted_parameters()
+        figs = self.plot_random_experiments(n_experiments=n_experiments, seed=seed)
+        plt.close()
         parity_fig, parity = self.plot_parity()
 
-        return {
-            "curves_figure": curves_fig,
-            "parity_figure": parity_fig,
-            "experiment_ids": experiment_ids,
-            "parity_data": parity,
-        }
+        # return {
+        #     "curves_figure": curves_fig,
+        #     "parity_figure": parity_fig,
+        #     "experiment_ids": experiment_ids,
+        #     "parity_data": parity,
+        #     "parameter_data": parameter_data
+        # }
     
     def _rate_names(self, predictions):
         names = [name for name, value in predictions.items() if re.fullmatch(r"[rR]\d+", name) and torch.is_tensor(value) and value.ndim >= 2]
         return sorted(names, key=lambda name: (int(name[1:]), name[0].isupper()))
+    
+    def collect_fitted_parameters(self):
+        parameter_info = getattr(self.model, "fitted_parameter_keys", {})
+
+        if isinstance(parameter_info, (list, tuple)):
+            parameter_info = {name: name for name in parameter_info}
+
+        values = {name: [] for name in parameter_info}
+
+        if not values:
+            return values
+
+        loader = DataLoader(self.dataset, batch_size=self.batch_size, shuffle=False, collate_fn=collate_experiments)
+
+        for batch in loader:
+            batch, predictions = self.predict_batch(batch)
+            observation_mask = batch["observation_mask"]
+
+            for name in values:
+                if name not in predictions:
+                    continue
+
+                value = predictions[name]
+
+                if not torch.is_tensor(value):
+                    continue
+
+                if value.ndim == 0:
+                    arr = np.array([value.detach().cpu().item()])
+
+                elif value.ndim == 1:
+                    arr = value.detach().cpu().numpy()
+
+                else:
+                    # Static parameters are repeated over the temperature trajectory.
+                    # Take one value per experiment rather than counting every T point.
+                    batch_values = []
+
+                    for i in range(value.shape[0]):
+                        valid = torch.where(observation_mask[i])[0]
+
+                        if len(valid) == 0:
+                            continue
+
+                        batch_values.append(value[i, valid[0]].reshape(-1)[0])
+
+                    if not batch_values:
+                        continue
+
+                    arr = torch.stack(batch_values).detach().cpu().numpy()
+
+                arr = arr[np.isfinite(arr)]
+
+                if len(arr):
+                    values[name].append(arr)
+
+        for name in values:
+            values[name] = np.concatenate(values[name]) if values[name] else np.array([])
+
+        return values
+    
+    def plot_fitted_parameters(self):
+        data = self.collect_fitted_parameters()
+        parameter_info = getattr(self.model, "fitted_parameter_keys", {})
+
+        if isinstance(parameter_info, (list, tuple)):
+            parameter_info = {name: name for name in parameter_info}
+
+        active_names = [name for name, values in data.items() if len(values) > 0]
+
+        if not active_names:
+            return None, data
+
+        n_cols = 3
+        n_rows = int(np.ceil(len(active_names) / n_cols))
+
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(14, 4.2 * n_rows))
+        axes = np.asarray(axes).reshape(-1)
+
+        for ax, name in zip(axes, active_names):
+            values = data[name]
+            bins = min(20, max(5, int(np.sqrt(len(values)))))
+
+            ax.hist(values, bins=bins)
+            ax.axvline(np.median(values), linestyle="--", linewidth=1, label="Median")
+
+            ax.set_title(parameter_info.get(name, name))
+            ax.set_xlabel(parameter_info.get(name, name))
+            ax.set_ylabel("Experiments")
+            ax.grid(alpha=0.2)
+
+            ax.text(
+                0.97, 0.95,
+                f"n = {len(values)}\nmean = {np.mean(values):.3g}\nmedian = {np.median(values):.3g}",
+                transform=ax.transAxes,
+                ha="right",
+                va="top",
+            )
+
+            ax.legend()
+
+        for ax in axes[len(active_names):]:
+            ax.remove()
+
+        fig.suptitle("Fitted parameter distributions — full dataset", fontsize=14)
+        fig.tight_layout(rect=[0, 0, 1, 0.97])
+
+        if self.outdir is not None:
+            fig.savefig(self.outdir / "fitted_parameter_histograms.png", dpi=300, bbox_inches="tight")
+
+        return fig, data

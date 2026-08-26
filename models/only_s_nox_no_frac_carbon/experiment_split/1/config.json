@@ -1,21 +1,6 @@
-from pathlib import Path
-import json
-import torch
-
-from src.architectures import ArrheniusOnlySelectivityModel
-from src.trainer import Trainer
-from src.utils import *
-from src.analyser import ModelAnalyser
-
-
-data_name = "experiment_split"
-seed = 1
-data_dir_string = f"data/{data_name}/{seed}"
-data_dir = Path(data_dir_string)
-
-CFG = {
+{
+    "model_name": "ArrheniusOnlySelectivityModelOld",
     "data": {
-        "data_dir": data_dir_string,
         "fill_values": {
             "sup_calcination_temp": "mean",
             "sup_calcination_time": "median",
@@ -23,12 +8,13 @@ CFG = {
         },
         "ode_start": "first_data_point"
     },
-
     "nn": {
-        "hidden_dim": [16, 16],
+        "hidden_dim": [
+            16,
+            16
+        ],
         "output_dim": 4,
         "activation": "ReLU",
-
         "static_inputs": [
             "NO_initial_ppm",
             "NO2_initial_ppm",
@@ -40,16 +26,46 @@ CFG = {
             "sup_calcination_temp",
             "sup_calcination_time",
             "Sbet"
-        ],  # elements automatically included
-
+        ],
         "state": [
             "mass_soot_remaining_mg",
             "temperature_K"
         ],
-
-        # "oxidisable_mass_fraction_bounds": [0.8, 1.3]
+        "oxidisable_mass_fraction_bounds": [
+            0.8,
+            1.3
+        ],
+        "input_dim": 26,
+        "input_cols": [
+            "NO_initial_ppm",
+            "NO2_initial_ppm",
+            "O2_vol%",
+            "mass_catalyst",
+            "tight_contact",
+            "mass_silica_beads",
+            "gas_flow_ml_min",
+            "sup_calcination_temp",
+            "sup_calcination_time",
+            "Sbet",
+            "sup_Ce",
+            "sup_Pr",
+            "sup_Co",
+            "sup_Zr",
+            "sup_Ba",
+            "sup_Fe",
+            "sup_Ni",
+            "sup_Mn",
+            "sup_Cu",
+            "sup_La",
+            "sup_Al",
+            "sup_Ti",
+            "sup_K",
+            "sup_Mg",
+            "mass_soot_remaining_mg",
+            "temperature_K"
+        ],
+        "total_learnable_parameters": 1495
     },
-
     "physics": {
         "required_unscaled_inputs": [
             "mass_soot_remaining_mg",
@@ -57,7 +73,6 @@ CFG = {
             "temperature_K",
             "O2_fraction"
         ],
-
         "targets": [
             "no2_fraction_of_nox",
             "nox_ppm",
@@ -69,22 +84,13 @@ CFG = {
             "soot_oxidation_co_concentration_ppm",
             "soot_oxidation_co2_selectivity"
         ],
-
         "rate_scales": {
-            "k1": 1e-6
+            "k1": 1e-06
         },
-
         "damkohler_scales": {
             "Da2": 1.0,
             "y3": 0.1
         },
-
-        "arrhenius": {
-            "T_ref_K": 700.0,
-            "Ea_bounds_kJ_mol": [0.0, 300.0],
-            "log_ref_multiplier_bound": 10.0
-        },
-
         "solver": {
             "method": "rk4",
             "options": {
@@ -92,14 +98,11 @@ CFG = {
             }
         }
     },
-
     "loss": {
         "target_weights": {
             "mass_soot_remaining_mg": 1.0,
             "soot_oxidation_co2_selectivity": 1.0,
             "no2_fraction_of_nox": 1.0,
-
-            # not training on absolute concentrations
             "soot_oxidation_co2_concentration_ppm": 0.0,
             "soot_oxidation_co_concentration_ppm": 0.0,
             "nox_ppm": 0.0,
@@ -107,64 +110,34 @@ CFG = {
             "no_ppm": 0.0,
             "n2_ppm": 0.0
         },
-
-        "target_scales": {},
+        "target_scales": {
+            "no2_fraction_of_nox": 0.16956587567827985,
+            "nox_ppm": 386.59512225751143,
+            "no2_ppm": 105.47966261617137,
+            "no_ppm": 342.235626227182,
+            "n2_ppm": 47.773922588333235,
+            "mass_soot_remaining_mg": 4.969422128733813,
+            "soot_oxidation_co2_concentration_ppm": 3783.733370539944,
+            "soot_oxidation_co_concentration_ppm": 168.883483977599,
+            "soot_oxidation_co2_selectivity": 0.14516726947151146
+        },
         "carbon_weight": 0.5,
         "nitrogen_weight": 0.5
     },
-
     "train": {
         "batch_size": 32,
         "epochs": 1000,
         "early_stopping_patience": 25,
-
         "optimiser_name": "AdamW",
         "optimiser_kwargs": {
-            "lr": 4e-4,
-            "weight_decay": 1e-6
+            "lr": 0.0004,
+            "weight_decay": 1e-06
         },
-
         "debug": {
-            "enabled": False,
+            "enabled": false,
             "print_top_experiments": 5,
-            "print_gradients": True,
-            "gradient_clip_norm": None
+            "print_gradients": true,
+            "gradient_clip_norm": null
         }
     }
 }
-
-
-if __name__ == "__main__":
-    cfg = CFG.copy()
-
-    outdir = Path(f"models/only_s_nox/{data_name}/{seed}")
-    outdir.mkdir(exist_ok=True, parents=True)
-
-    data = prepare_data(data_dir, cfg, outdir)
-    torch.save(data["test"], outdir / "test_dataset.pt")
-
-    model = ArrheniusOnlySelectivityModel(cfg, len(data["input_cols"]), data["scaler"])
-
-    cfg["model_name"] = model.__class__.__name__
-    cfg["nn"]["total_learnable_parameters"] = model.count_parameters()
-
-    with open(outdir / "config.json", "w") as f:
-        json.dump(cfg, f, indent=4)
-
-    trainer = Trainer(
-        cfg,
-        model,
-        data["train"],
-        data["eval"],
-        output_dir=outdir
-    )
-
-    trainer.train()
-    plot_loss_history(trainer, outdir=outdir)
-
-    analyser = ModelAnalyser(
-        model,
-        data["test"],
-        outdir=outdir / "analysis"
-    )
-    analyser.analyse()

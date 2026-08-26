@@ -4,7 +4,6 @@ from typing import Dict
 
 import torch
 from torch.utils.data import DataLoader
-from .architectures.total_nox_model import NOxSelectivityModel
 from .data_processing import ExperimentDataset, collate_experiments
 from .loss import BalanceBasedLoss
 
@@ -25,7 +24,7 @@ class Trainer:
     def __init__(
         self,
         cfg: Dict,
-        model: NOxSelectivityModel,
+        model,
         train_dataset: ExperimentDataset,
         eval_dataset: ExperimentDataset,
         device=None,

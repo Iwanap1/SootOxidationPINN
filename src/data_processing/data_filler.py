@@ -76,13 +76,19 @@ class DataFiller:
     def __init__(
         self,
         *,
-        add_provenance: bool = True,
-        max_iterations: int = 10,
-        clip_small_negative: float = 1e-12,
+        add_provenance=True,
+        max_iterations=10,
+        clip_small_negative=1e-12,
+        derive_soot_conversion_from_cox=False,
+        cox_endpoint_fraction=0.05,
+        min_cox_points=5,
     ):
         self.add_provenance = add_provenance
         self.max_iterations = max_iterations
         self.clip_small_negative = clip_small_negative
+        self.derive_soot_conversion_from_cox = derive_soot_conversion_from_cox
+        self.cox_endpoint_fraction = cox_endpoint_fraction
+        self.min_cox_points = min_cox_points
         self.report = FillReport()
 
     # ------------------------------------------------------------------
@@ -132,6 +138,10 @@ class DataFiller:
             after = int(df.notna().sum().sum())
             if after == before:
                 break
+
+        if self.derive_soot_conversion_from_cox:
+            self._fill_soot_conversion_from_cox(df)
+            self._fill_soot_mass(df)
 
         return df
 
@@ -687,6 +697,73 @@ class DataFiller:
             mass_mg - remaining,
             f"{self.MASS_SOOT}*1000 - {self.MASS_SOOT_REMAINING}",
         )
+
+    def _fill_soot_conversion_from_cox(self, df):
+        if "_id" not in df.columns:
+            raise ValueError("Need _id to derive conversion experiment-by-experiment.")
+
+        for exp_id, exp in df.groupby("_id"):
+            exp = exp.sort_values("temperature")
+
+            T = pd.to_numeric(exp["temperature"], errors="coerce")
+            cox = pd.to_numeric(exp[self.COX_PPM], errors="coerce")
+            flow = pd.to_numeric(exp["gas_flow_ml_min"], errors="coerce")
+            ramp = pd.to_numeric(exp["ramp_rate_C_min"], errors="coerce")
+
+            valid = T.notna() & cox.notna() & flow.notna()
+
+            if valid.sum() < self.min_cox_points:
+                continue
+
+            T_valid = T[valid].to_numpy(dtype=float)
+            cox_valid = cox[valid].to_numpy(dtype=float)
+            flow_valid = flow[valid].to_numpy(dtype=float)
+
+            beta = ramp.dropna()
+            if len(beta) == 0 or beta.iloc[0] <= 0:
+                continue
+
+            peak = np.max(cox_valid)
+
+            if not np.isfinite(peak) or peak <= 0:
+                continue
+
+            endpoint_limit = self.cox_endpoint_fraction * peak
+
+            if cox_valid[0] > endpoint_limit or cox_valid[-1] > endpoint_limit:
+                continue
+
+            time = (T_valid - T_valid[0]) / float(beta.iloc[0])
+
+            signal = cox_valid * flow_valid
+
+            area = np.zeros_like(signal)
+            area[1:] = np.cumsum(
+                0.5 * (signal[:-1] + signal[1:]) * np.diff(time)
+            )
+
+            if area[-1] <= 0:
+                continue
+
+            conversion_valid = 100.0 * area / area[-1]
+
+            conversion_all = np.interp(
+                T.to_numpy(dtype=float),
+                T_valid,
+                conversion_valid,
+                left=0.0,
+                right=100.0,
+            )
+
+            values = pd.Series(conversion_all, index=exp.index)
+
+            self._assign(
+                df,
+                self.SOOT_CONVERSION,
+                pd.Series(df.index.isin(exp.index), index=df.index),
+                values.reindex(df.index),
+                "normalised integral of COx concentration × gas flow",
+            )
 
 
 

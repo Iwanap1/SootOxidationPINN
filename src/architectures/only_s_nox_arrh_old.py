@@ -4,8 +4,8 @@ import torch.nn.functional as F
 from .mlp import MLP
 from .only_s_nox import OnlySelectivityModel
 
-
-class ArrheniusOnlySelectivityModel(OnlySelectivityModel):
+# did not bound activation energies but did bound pre exponential
+class ArrheniusOnlySelectivityModelOld(OnlySelectivityModel):
     def __init__(self, config, nn_input_dim, scaler):
         super().__init__(config, nn_input_dim, scaler)
 
@@ -22,14 +22,9 @@ class ArrheniusOnlySelectivityModel(OnlySelectivityModel):
         self.co2_nn = MLP(input_dim=nn_input_dim, cfg=co2_cfg)
 
         cfg_arr = config["physics"].get("arrhenius", {})
-
         self.T_ref = cfg_arr.get("T_ref_K", 700.0)
-
-        Ea_bounds = cfg_arr.get("Ea_bounds_kJ_mol", [0.0, 300.0])
-        self.Ea_min = Ea_bounds[0] * 1000.0
-        self.Ea_max = Ea_bounds[1] * 1000.0
-
-        self.log_ref_bound = cfg_arr.get("log_ref_multiplier_bound", 10.0)
+        self.Ea_scale = cfg_arr.get("Ea_scale_kJ_mol", 50.0) * 1000.0
+        self.log_ref_bound = cfg_arr.get("log_ref_multiplier_bound", 2.0)
         self.fitted_parameter_keys = {
             "Ea1_kJ_mol": "$E_{a,1}$ (kJ mol$^{-1}$)",
             "Ea2_kJ_mol": "$E_{a,2}$ (kJ mol$^{-1}$)",
@@ -38,7 +33,6 @@ class ArrheniusOnlySelectivityModel(OnlySelectivityModel):
             "b2": "$b_2$",
             "b3": "$b_3$",
         }
-
         self.diagnostic_output_keys = [
             "y1",
             "Da2",
@@ -47,9 +41,6 @@ class ArrheniusOnlySelectivityModel(OnlySelectivityModel):
             "Ea1_kJ_mol",
             "Ea2_kJ_mol",
             "Ea3_kJ_mol",
-            "b1",
-            "b2",
-            "b3",
         ]
 
     def calculate_model_terms(self, static_inputs_scaled, state_scaled, nn_inputs, m_C, T):
@@ -59,9 +50,9 @@ class ArrheniusOnlySelectivityModel(OnlySelectivityModel):
         b2 = self.log_ref_bound * torch.tanh(z_b2)
         b3 = self.log_ref_bound * torch.tanh(z_b3)
 
-        Ea1 = self.Ea_min + (self.Ea_max - self.Ea_min) * torch.sigmoid(z_Ea1)
-        Ea2 = self.Ea_min + (self.Ea_max - self.Ea_min) * torch.sigmoid(z_Ea2)
-        Ea3 = self.Ea_min + (self.Ea_max - self.Ea_min) * torch.sigmoid(z_Ea3)
+        Ea1 = self.Ea_scale * F.softplus(z_Ea1)
+        Ea2 = self.Ea_scale * F.softplus(z_Ea2)
+        Ea3 = self.Ea_scale * F.softplus(z_Ea3)
 
         R = self.physics_calculator.R
 
@@ -85,8 +76,5 @@ class ArrheniusOnlySelectivityModel(OnlySelectivityModel):
                 "Ea1_kJ_mol": Ea1 / 1000.0,
                 "Ea2_kJ_mol": Ea2 / 1000.0,
                 "Ea3_kJ_mol": Ea3 / 1000.0,
-                "b1": b1,
-                "b2": b2,
-                "b3": b3,
             },
         }
